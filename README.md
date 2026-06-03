@@ -136,7 +136,7 @@ across restarts via the mounted volume.
 | `c-edit` | `Fix issue in PR {pr_url}, write tests, push to new branch, create PR to dev branch and merge. If there is no dev branch, create it first.` |
 
 Edit these (or add your own) from the **Rules Config** tab. The same rules fire for
-both pull requests and issues, and `{pr_url}` is replaced with the real PR **or
+both pull requests and issues, and `{pr_url}` is must be used in rules and will be replaced with the real PR **or
 issue** link at trigger time.
 
 ## Project layout
