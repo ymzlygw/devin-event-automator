@@ -11,6 +11,12 @@ description: End-to-end local testing for the FastAPI + Gradio GitHub-webhook ->
 in a `BackgroundTask`. State lives in `roles_config.json` / `sessions.json` under
 `DATA_DIR`.
 
+**Supported events:** both `pull_request` AND `issues` with `action == "labeled"`
+(`app.py` reads the labeled object from `payload["pull_request"]` or
+`payload["issue"]`; `{pr_url}` resolves to whichever URL applies). When debugging
+"no session was created", FIRST check which event the repo webhook actually sends:
+a hook subscribed to *Issues* will never deliver `pull_request`, and vice-versa.
+
 ## Devin Secrets Needed
 - For REAL end-to-end runs: `DEVIN_API_KEY`, `DEVIN_ORG_ID`, `GITHUB_WEBHOOK_SECRET`, `NGROK_TOKEN` (optional `NGROK_DOMAIN`).
 - For local TESTING none of the above are required — mock the Devin API instead (below). Creating real Devin sessions is wasteful, so prefer the mock.
@@ -19,7 +25,7 @@ in a `BackgroundTask`. State lives in `roles_config.json` / `sessions.json` unde
 1. Create venv + install: `python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`
 2. Run a local mock of the Devin v3 API on a spare port (e.g. 9009) implementing:
    - `POST /v3/organizations/{org}/sessions` -> returns `{"session_id":"devin-test123","url":"https://app.devin.ai/sessions/test123","status":"running"}`
-   - `GET  /v3/organizations/{org}/sessions/{id}` -> returns `{"status":"running","status_detail":"working","url":...,"messages":[...]}`
+   - `GET  /v3/organizations/{org}/sessions/{id}` -> returns `{"status":"running","status_detail":"working","url":...,"title":...,"messages":[...]}`
 3. Start the app pointing at the mock and leaving ngrok off:
    ```bash
    . .venv/bin/activate
@@ -29,8 +35,19 @@ in a `BackgroundTask`. State lives in `roles_config.json` / `sessions.json` unde
    ```
    `DEVIN_API_BASE` is the override hook (app.py reads it); leaving `NGROK_TOKEN` unset skips the tunnel.
 
-## Trigger the webhook
-GitHub signs the raw body. Reproduce with:
+## Fresh-deploy / startup init check
+Use a brand-new empty `DATA_DIR` (e.g. `rm -rf /tmp/devin_test_data` before start).
+On startup `init_data_store()` must:
+- create `DATA_DIR` (no manual `mkdir` needed),
+- seed `roles_config.json` with default rules,
+- create `sessions.json` as `[]` if missing — log line: `Initialized empty sessions store at <DATA_DIR>/sessions.json`.
+Verify: `ls $DATA_DIR` shows BOTH json files and `cat $DATA_DIR/sessions.json` is `[]`
+BEFORE any webhook fires. Adversarial value: older code only wrote `sessions.json`
+on the first triggered session, so a fresh deploy left it absent and the dashboard
+rendered empty/errored — a broken impl is visibly different (file missing).
+
+## Trigger the webhook (local, signed)
+GitHub signs the raw body. Reproduce a PR event with:
 ```bash
 BODY='{"action":"labeled","label":{"name":"c-review"},"pull_request":{"number":42,"html_url":"https://github.com/o/r/pull/42"}}'
 SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac testsecret | sed 's/^.*= //')"
@@ -38,17 +55,33 @@ curl -s -w '\n%{http_code}\n' -X POST http://127.0.0.1:8000/webhook \
   -H 'Content-Type: application/json' -H 'X-GitHub-Event: pull_request' \
   -H "X-Hub-Signature-256: $SIG" -d "$BODY"
 ```
+For an **issue** event use `-H 'X-GitHub-Event: issues'` and an `"issue":{...}` key
+instead of `"pull_request":{...}`. GitHub's default content type is
+`application/x-www-form-urlencoded` (body = `payload=<urlencoded JSON>`); the app
+handles both — test that path with `-H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "payload=$BODY"`.
 Expect `200 {"detail":"accepted",...}`. A bad signature must return `401`.
 
 ## UI checks (Gradio at http://localhost:8000/)
+- **Session Dashboard (fresh deploy)**: even before any webhook, the tab renders the
+  6 headers (PR Number, Label, session_id, devin_url, Status, Created Time) with 0
+  rows and no error — this proves the startup-created `sessions.json`.
 - **Rules Config**: add a label+prompt, click Add/Update. The status line confirms,
   and `roles_config.json` updates immediately. NOTE: the table may not re-render the
   new row until you switch tabs or click Refresh again — verify via the file on disk
   if the UI looks stale (this might be a Gradio render quirk, not a logic bug).
-- **Session Dashboard**: after a webhook fires, the row should show a clickable
-  `View Session` link (rendered because the column uses `datatype="markdown"`).
+- **Session Dashboard (after webhook)**: the row should show the PR/issue number and a
+  clickable `View Session` link (rendered because the column uses `datatype="markdown"`).
 - **Live Agent Tracker**: click "Reload IDs", pick the `session_id`, click "Fetch Now";
-  the textbox should show Status/Status detail/URL and a Messages/Events section.
+  the textbox should show Status/Status detail/URL/Title and a Messages/Events section.
+
+## REAL end-to-end via the live GitHub webhook (issue demo)
+If real creds are present AND the repo webhook already points at your ngrok domain,
+you can drive a faithful test entirely from the `gh` CLI (issue pages are public so
+Devin's comment is visible for a recording). Use a comment-only rule (like `c-hello`)
+so the real session does NOT modify the repo. `gh api repos/<o>/<r>/hooks` shows the
+hook `events` + `config.url`; `gh issue create ... && gh issue edit <n> --add-label
+c-hello` fires a real `issues/labeled` delivery. Devin may take 1-3 min; close the
+throwaway issue when done.
 
 ## Gotchas
 - The v3 GET endpoint expects a `devin-` prefixed id; `app.py` normalizes this, so
