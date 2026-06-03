@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import gradio as gr
 import httpx
@@ -221,6 +222,39 @@ async def process_labeled_pr(pr_number: Any, pr_url: str, label: str) -> None:
     append_session(record)
 
 
+def parse_webhook_payload(body: bytes) -> dict[str, Any] | None:
+    """Parse a GitHub webhook body regardless of its content type.
+
+    GitHub can deliver the payload either as raw JSON (``application/json``) or
+    as ``application/x-www-form-urlencoded`` (the default), where the body is
+    ``payload=<url-encoded JSON>``. We accept both so the receiver works no
+    matter how the webhook content type is configured.
+    """
+    text = body.decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
+
+    # Case 1: raw JSON body.
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Case 2: form-encoded body with a `payload` field.
+    if "payload=" in text:
+        values = parse_qs(text).get("payload")
+        if values:
+            try:
+                data = json.loads(values[0])
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, ValueError):
+                return None
+    return None
+
+
 def verify_signature(body: bytes, signature_header: str | None) -> bool:
     """Validate the GitHub ``X-Hub-Signature-256`` header.
 
@@ -302,16 +336,19 @@ async def webhook(
         logger.warning("Invalid webhook signature; rejecting request.")
         return JSONResponse(status_code=401, content={"detail": "invalid signature"})
 
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return JSONResponse(status_code=400, content={"detail": "invalid JSON"})
+    payload = parse_webhook_payload(body)
+    if payload is None:
+        logger.warning("Could not parse webhook body as JSON or form-encoded payload.")
+        return JSONResponse(status_code=400, content={"detail": "invalid payload"})
+
+    action = payload.get("action")
+    logger.info("Webhook received: event=%s action=%s", x_github_event, action)
 
     # Only handle pull_request "labeled" events.
     if x_github_event and x_github_event != "pull_request":
         return JSONResponse(content={"detail": f"ignored event: {x_github_event}"})
 
-    if payload.get("action") != "labeled":
+    if action != "labeled":
         return JSONResponse(content={"detail": "ignored: action is not 'labeled'"})
 
     pull_request = payload.get("pull_request") or {}

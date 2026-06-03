@@ -95,7 +95,8 @@ python app.py          # or: uvicorn app:app --host 0.0.0.0 --port 8000
 1. In your GitHub repository go to **Settings → Webhooks → Add webhook**.
 2. **Payload URL**: the ngrok URL from the logs, with `/webhook` appended, e.g.
    `https://<your-subdomain>.ngrok-free.app/webhook`.
-3. **Content type**: `application/json`.
+3. **Content type**: `application/json` is recommended, but the receiver also
+   accepts GitHub's default `application/x-www-form-urlencoded`.
 4. **Secret**: the same value as `GITHUB_WEBHOOK_SECRET` in your `.env`.
 5. **Which events?** → *Let me select individual events* → check **Pull requests**.
 6. Save. GitHub sends a `ping`; subsequent `pull_request` `labeled` events will
