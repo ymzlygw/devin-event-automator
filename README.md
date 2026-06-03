@@ -8,7 +8,7 @@ to manage rules, track triggered tasks, and stream live Devin logs.
 ## How it works
 
 ```
-GitHub PR labeled  ──▶  POST /webhook (FastAPI)
+GitHub PR/Issue labeled  ──▶  POST /webhook (FastAPI)
                          │  1. verify X-Hub-Signature-256
                          │  2. return 200 OK immediately
                          ▼
@@ -25,8 +25,10 @@ inside `BackgroundTasks`, so GitHub never times out.
 
 ## Features
 
-- **FastAPI `/webhook`** — validates `X-Hub-Signature-256`, only acts on
-  `pull_request` events with `action == "labeled"`, and processes work asynchronously.
+- **FastAPI `/webhook`** — validates `X-Hub-Signature-256`, acts on
+  `pull_request` **and** `issues` events with `action == "labeled"` (the
+  `{pr_url}` placeholder resolves to the PR or issue URL), and processes work
+  asynchronously.
 - **JSON persistence** — `roles_config.json` (label → prompt rules) and
   `sessions.json` (triggered task history). Both are created automatically and are
   read/written defensively.
@@ -98,9 +100,10 @@ python app.py          # or: uvicorn app:app --host 0.0.0.0 --port 8000
 3. **Content type**: `application/json` is recommended, but the receiver also
    accepts GitHub's default `application/x-www-form-urlencoded`.
 4. **Secret**: the same value as `GITHUB_WEBHOOK_SECRET` in your `.env`.
-5. **Which events?** → *Let me select individual events* → check **Pull requests**.
-6. Save. GitHub sends a `ping`; subsequent `pull_request` `labeled` events will
-   trigger Devin according to your configured rules.
+5. **Which events?** → *Let me select individual events* → check **Pull requests**
+   and/or **Issues** (both `labeled` events are supported).
+6. Save. GitHub sends a `ping`; subsequent `pull_request` / `issues` `labeled`
+   events will trigger Devin according to your configured rules.
 
 ### Default rules
 

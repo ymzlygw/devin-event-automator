@@ -1,9 +1,10 @@
 """GitHub Webhook -> Devin AI proxy service.
 
-A FastAPI service that receives GitHub Pull Request webhooks, asynchronously
-triggers Devin AI sessions based on PR labels, and exposes a Gradio admin panel
-(mounted at "/") to manage label rules, track task status, and stream live Devin
-execution logs. The public webhook receiver is exposed via an ngrok tunnel.
+A FastAPI service that receives GitHub webhooks (pull request *and* issue
+``labeled`` events), asynchronously triggers Devin AI sessions based on the
+label, and exposes a Gradio admin panel (mounted at "/") to manage label rules,
+track task status, and stream live Devin execution logs. The public webhook
+receiver is exposed via an ngrok tunnel.
 
 All configuration and state is read from environment variables and small JSON
 files. No secrets are hardcoded.
@@ -176,19 +177,23 @@ async def get_devin_session(session_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Webhook background processing
 # ---------------------------------------------------------------------------
-async def process_labeled_pr(pr_number: Any, pr_url: str, label: str) -> None:
-    """Background task: resolve the label rule and trigger a Devin session."""
+async def process_labeled_event(number: Any, target_url: str, label: str) -> None:
+    """Background task: resolve the label rule and trigger a Devin session.
+
+    Works for both pull requests and issues; ``target_url`` is the PR/issue URL
+    substituted into the ``{pr_url}`` placeholder.
+    """
     roles = load_roles_config()
     prompt_template = roles.get(label)
     if not prompt_template:
         logger.info("No rule configured for label '%s'; skipping.", label)
         return
 
-    prompt = prompt_template.replace("{pr_url}", pr_url)
+    prompt = prompt_template.replace("{pr_url}", target_url)
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     record: dict[str, Any] = {
-        "PR Number": pr_number,
+        "PR Number": number,
         "Label": label,
         "session_id": "",
         "devin_url": "",
@@ -202,22 +207,22 @@ async def process_labeled_pr(pr_number: Any, pr_url: str, label: str) -> None:
         record["devin_url"] = data.get("url", "")
         record["Status"] = data.get("status", "created")
         logger.info(
-            "Created Devin session %s for PR #%s (label=%s).",
+            "Created Devin session %s for #%s (label=%s).",
             record["session_id"],
-            pr_number,
+            number,
             label,
         )
     except httpx.HTTPStatusError as exc:
         record["Status"] = f"error: HTTP {exc.response.status_code}"
         logger.error(
-            "Devin API error for PR #%s: %s - %s",
-            pr_number,
+            "Devin API error for #%s: %s - %s",
+            number,
             exc.response.status_code,
             exc.response.text[:500],
         )
     except (httpx.HTTPError, ValueError) as exc:
         record["Status"] = f"error: {exc}"
-        logger.error("Failed to create Devin session for PR #%s: %s", pr_number, exc)
+        logger.error("Failed to create Devin session for #%s: %s", number, exc)
 
     append_session(record)
 
@@ -344,27 +349,33 @@ async def webhook(
     action = payload.get("action")
     logger.info("Webhook received: event=%s action=%s", x_github_event, action)
 
-    # Only handle pull_request "labeled" events.
-    if x_github_event and x_github_event != "pull_request":
+    # Handle "labeled" events for both pull requests and issues.
+    supported_events = {"pull_request", "issues"}
+    if x_github_event and x_github_event not in supported_events:
         return JSONResponse(content={"detail": f"ignored event: {x_github_event}"})
 
     if action != "labeled":
         return JSONResponse(content={"detail": "ignored: action is not 'labeled'"})
 
-    pull_request = payload.get("pull_request") or {}
-    pr_url = pull_request.get("html_url", "")
-    pr_number = pull_request.get("number")
+    # The labeled object lives under "pull_request" (PR events) or "issue"
+    # (issue events). Support both so the same rules apply to either.
+    target = payload.get("pull_request") or payload.get("issue") or {}
+    target_url = target.get("html_url", "")
+    number = target.get("number")
     label = (payload.get("label") or {}).get("name", "")
 
-    if not pr_url or not label:
+    if not target_url or not label:
         return JSONResponse(
-            status_code=400, content={"detail": "missing pull_request url or label"}
+            status_code=400,
+            content={"detail": "missing issue/pull_request url or label"},
         )
 
     # Offload the heavy lifting so we can return 200 immediately.
-    background_tasks.add_task(process_labeled_pr, pr_number, pr_url, label)
-    logger.info("Queued Devin trigger for PR #%s (label=%s).", pr_number, label)
-    return JSONResponse(content={"detail": "accepted", "pr": pr_number, "label": label})
+    background_tasks.add_task(process_labeled_event, number, target_url, label)
+    logger.info("Queued Devin trigger for #%s (label=%s).", number, label)
+    return JSONResponse(
+        content={"detail": "accepted", "number": number, "label": label}
+    )
 
 
 # ---------------------------------------------------------------------------
