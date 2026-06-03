@@ -80,6 +80,9 @@ This will:
 - expose the app on <http://localhost:8000> (Gradio panel at `/`),
 - open an ngrok tunnel and log the public URL.
 
+The `./data` host folder is created automatically by Docker Compose when it mounts
+the volume — you do **not** need to `mkdir data` after cloning.
+
 After startup, look in the container logs for a line like:
 
 ```
@@ -95,6 +98,22 @@ pip install -r requirements.txt
 cp .env.example .env   # then edit
 python app.py          # or: uvicorn app:app --host 0.0.0.0 --port 8000
 ```
+
+## State files (auto-created)
+
+You never need to create the data folder or the JSON files by hand. On startup the
+app runs `init_data_store()`, which:
+
+- creates `DATA_DIR` (the `./data` folder under Docker, or the current directory
+  when run locally) if it does not exist,
+- seeds `roles_config.json` with the default label → prompt rules,
+- creates `sessions.json` as an empty list (`[]`) so the **Session Dashboard** and
+  **Live Agent Tracker** render correctly even before any session is triggered.
+
+Set `DATA_DIR` to control where these files live (the Docker image sets it to
+`/data`, which is mounted to `./data` on the host). `sessions.json` is then
+appended to each time a label triggers a Devin session, so the history persists
+across restarts via the mounted volume.
 
 ## Configuring the GitHub webhook
 

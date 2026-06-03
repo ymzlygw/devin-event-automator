@@ -134,6 +134,21 @@ def append_session(record: dict[str, Any]) -> None:
     save_sessions(sessions)
 
 
+def init_data_store() -> None:
+    """Ensure the data directory and JSON state files exist on startup.
+
+    The data directory is created automatically (no manual ``mkdir`` needed
+    after cloning), ``roles_config.json`` is seeded with defaults, and
+    ``sessions.json`` is created as an empty list so the dashboard renders
+    before any session has been triggered.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    load_roles_config()
+    if not SESSIONS_PATH.exists():
+        save_sessions([])
+        logger.info("Initialized empty sessions store at %s", SESSIONS_PATH)
+
+
 # ---------------------------------------------------------------------------
 # Devin API interaction module
 # ---------------------------------------------------------------------------
@@ -302,8 +317,8 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("NGROK_TOKEN not set; skipping ngrok tunnel startup.")
 
-    # Ensure config exists at startup.
-    load_roles_config()
+    # Ensure the data directory and JSON state files exist at startup.
+    init_data_store()
 
     try:
         yield
