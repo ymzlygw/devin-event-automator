@@ -1,0 +1,23 @@
+services:
+  devin-event-automator:
+    build: .
+    image: devin-event-automator:latest
+    container_name: devin-event-automator
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      # ngrok local web inspection UI (optional).
+      - "4040:4040"
+    environment:
+      DEVIN_API_KEY: ${DEVIN_API_KEY}
+      DEVIN_ORG_ID: ${DEVIN_ORG_ID}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      NGROK_TOKEN: ${NGROK_TOKEN}
+      NGROK_DOMAIN: ${NGROK_DOMAIN}
+      DATA_DIR: /data
+      PORT: "8000"
+    env_file:
+      - .env
+    volumes:
+      # Persist configuration and task records across container restarts.
+      - ./data:/data
