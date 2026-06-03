@@ -1,9 +1,13 @@
 # devin-event-automator
 
-An event-driven automation service that turns **GitHub Pull Request labels** into
-**Devin AI** sessions. It is built with **FastAPI + Gradio**, exposes the webhook
-receiver to the public internet via **ngrok**, and ships with a Gradio admin panel
-to manage rules, track triggered tasks, and stream live Devin logs.
+An event-driven automation service that turns **GitHub Pull Request _and_ Issue
+labels** into **Devin AI** sessions. It is built with **FastAPI + Gradio**, exposes
+the webhook receiver to the public internet via **ngrok**, and ships with a Gradio
+admin panel to manage rules, track triggered tasks, and stream live Devin logs.
+
+The same label → prompt rules apply whether you label a pull request or an issue:
+the receiver reads the labeled object from either the `pull_request` or `issue`
+payload, and the `{pr_url}` placeholder resolves to whichever URL applies.
 
 ## How it works
 
@@ -112,8 +116,9 @@ python app.py          # or: uvicorn app:app --host 0.0.0.0 --port 8000
 | `c-review` | `Review PR {pr_url}, identify bugs, add comments.` |
 | `c-edit` | `Fix issue in PR {pr_url}, write tests, push to new branch, create PR to dev branch and merge. If there is no dev branch, create it first.` |
 
-Edit these (or add your own) from the **Rules Config** tab. `{pr_url}` is replaced
-with the real PR link at trigger time.
+Edit these (or add your own) from the **Rules Config** tab. The same rules fire for
+both pull requests and issues, and `{pr_url}` is replaced with the real PR **or
+issue** link at trigger time.
 
 ## Project layout
 
