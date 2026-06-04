@@ -80,8 +80,10 @@ This will:
 - expose the app on <http://localhost:8000> (Gradio panel at `/`),
 - open an ngrok tunnel and log the public URL.
 
-The `./data` host folder is created automatically by Docker Compose when it mounts
-the volume — you do **not** need to `mkdir data` after cloning.
+The `./data` host folder is created automatically by Docker Compose when it mounts  
+the volume — you do **not** need to `mkdir data` after cloning.  
+## Note
+After add/update label, if refresh button not work, please switch the tab to refresh the label info in UI.  
 
 After startup, look in the container logs for a line like:
 
